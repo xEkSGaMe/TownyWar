@@ -12,7 +12,6 @@ import ru.example.townywar.assault.AssaultTntManager;
 import ru.example.townywar.assault.AssaultTntRecipe;
 import ru.example.townywar.assault.AssaultTntRepository;
 import ru.example.townywar.command.TownyCommandInterceptor;
-import ru.example.townywar.command.WarDeclareCommand;
 import ru.example.townywar.command.WarListCommand;
 import ru.example.townywar.config.ConfigManager;
 import ru.example.townywar.config.MessagesManager;
@@ -81,7 +80,6 @@ public final class TownyWarPlugin extends JavaPlugin {
     private WarshopManager warshopManager;
     private WarshopMenu warshopMenu;
     private PvpDeathListener pvpDeathListener;
-    private WarDeclareCommand warDeclareCommand;
 
     // Assault TNT
     private AssaultTntRepository assaultTntRepository;
@@ -178,9 +176,6 @@ public final class TownyWarPlugin extends JavaPlugin {
         this.negotiationMenu = new NegotiationMenu(this, negotiationManager);
         this.warListMenu = new WarListMenu(this);
 
-        // NEW: команда /twar declare с подтверждением
-        this.warDeclareCommand = new WarDeclareCommand(this, warManager);
-
         // War Stats
         this.warStatsRepository = new WarStatsRepository(database);
         this.warStatsMenu = new WarStatsMenu(this, warStatsRepository);
@@ -238,7 +233,6 @@ public final class TownyWarPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (warDeclareCommand != null) warDeclareCommand.shutdown();
         if (glowManager != null) glowManager.stop();
         if (warshopManager != null) warshopManager.shutdown();
         if (tributeScheduler != null) tributeScheduler.stop();
@@ -272,7 +266,6 @@ public final class TownyWarPlugin extends JavaPlugin {
     public AssaultTntManager getAssaultTntManager() { return assaultTntManager; }
     public WarStatsMenu getWarStatsMenu() { return warStatsMenu; }
     public WarListMenu getWarListMenu() { return warListMenu; }
-    public WarDeclareCommand getWarDeclareCommand() { return warDeclareCommand; }
 
     /** Удобный доступ к API из других плагинов. Может вернуть null. */
     public static @Nullable TownyWarAPI getAPI() {

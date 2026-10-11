@@ -9,7 +9,6 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
 import ru.example.townywar.TownyWarPlugin;
 import ru.example.townywar.war.War;
 import ru.example.townywar.war.WarManager;
@@ -32,18 +31,10 @@ public final class TownyWarCommandRegistrar {
 
     public void register(Commands commands) {
         LiteralCommandNode<CommandSourceStack> root = Commands.literal("twar")
-                // Игровой declare — доступен мэрам с townywar.declare.
-                .then(Commands.literal("declare")
-                        .requires(src -> src.getSender().hasPermission("townywar.declare"))
-                        .then(Commands.argument("town", StringArgumentType.string())
-                                .executes(this::declareWar)))
-                .then(Commands.literal("reload")
-                        .requires(src -> src.getSender().hasPermission("townywar.admin"))
-                        .executes(this::reload))
-                .then(Commands.literal("help")
-                        .executes(this::help))
+                .requires(src -> src.getSender().hasPermission("townywar.admin"))
+                .then(Commands.literal("reload").executes(this::reload))
+                .then(Commands.literal("help").executes(this::help))
                 .then(Commands.literal("admin")
-                        .requires(src -> src.getSender().hasPermission("townywar.admin"))
                         .then(Commands.literal("addpoints")
                                 .then(Commands.argument("town", StringArgumentType.string())
                                         .then(Commands.argument("amount", IntegerArgumentType.integer(1))
@@ -110,20 +101,6 @@ public final class TownyWarCommandRegistrar {
         commands.register(root, "Управление TownyWar");
     }
 
-    // ===== Игровой declare =====
-
-    private int declareWar(CommandContext<CommandSourceStack> ctx) {
-        CommandSender sender = ctx.getSource().getSender();
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage(MM.deserialize(
-                    "<red>Только игроки могут использовать эту команду.</red>"));
-            return 0;
-        }
-        String targetName = StringArgumentType.getString(ctx, "town");
-        TownyWarPlugin.get().getWarDeclareCommand().execute(player, targetName);
-        return 1;
-    }
-
     private int reload(CommandContext<CommandSourceStack> ctx) {
         TownyWarPlugin.get().getConfigManager().reload();
         TownyWarPlugin.get().getMessages().reload();
@@ -134,7 +111,6 @@ public final class TownyWarCommandRegistrar {
     private int help(CommandContext<CommandSourceStack> ctx) {
         CommandSender s = ctx.getSource().getSender();
         s.sendMessage(MM.deserialize("<gold><bold>TownyWar</bold></gold> <gray>— команды:</gray>"));
-        s.sendMessage(MM.deserialize("<yellow>/twar declare <город></yellow> <gray>— объявить войну (мэр, с подтверждением).</gray>"));
         s.sendMessage(MM.deserialize("<yellow>/twar reload</yellow> <gray>— перечитать конфиг.</gray>"));
         s.sendMessage(MM.deserialize("<yellow>/twar help</yellow> <gray>— это меню.</gray>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin addpoints <город> <n></yellow>"));

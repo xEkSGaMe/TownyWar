@@ -34,8 +34,8 @@ permissions:
     description: Доступ к /twar admin и /twar reload
     default: op
   townywar.declare:
-    description: Объявление войны обычными игроками через /twar declare и /t war <town>
-    default: false
+    description: Объявление войны
+    default: op
   townywar.cancel:
     description: Отмена войны
     default: op
