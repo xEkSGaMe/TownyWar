@@ -1,0 +1,59 @@
+name: TownyWar
+version: '${project.version}'
+main: ru.example.townywar.TownyWarPlugin
+bootstrapper: ru.example.townywar.TownyWarBootstrap
+api-version: '1.21'
+authors: [EksGame]
+description: War system for Towny
+website: https://example.ru
+
+dependencies:
+  server:
+    Towny:
+      load: BEFORE
+      required: true
+      join-classpath: true
+    Vault:
+      load: BEFORE
+      required: false
+      join-classpath: true
+    EssentialsX:
+      load: AFTER
+      required: false
+    ProtocolLib:
+      load: BEFORE
+      required: false
+      join-classpath: true
+    PlaceholderAPI:
+      load: BEFORE
+      required: false
+      join-classpath: true
+
+permissions:
+  townywar.admin:
+    description: Доступ к /twar admin и /twar reload
+    default: op
+  townywar.declare:
+    description: Объявление войны
+    default: op
+  townywar.cancel:
+    description: Отмена войны
+    default: op
+  townywar.glow:
+    description: Подсветка сторон
+    default: op
+  townywar.list:
+    description: Список войн
+    default: true
+  townywar.negotiation:
+    description: Переговоры после победы
+    default: op
+  townywar.breakblocks:
+    description: Разрешает ломать блоки в чанках противника во время боя
+    default: false
+  townywar.placeblocks:
+    description: Разрешает ставить блоки в чанках противника во время боя
+    default: false
+  townywar.warshop:
+    description: Доступ к /t warshop
+    default: false

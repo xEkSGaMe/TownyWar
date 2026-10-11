@@ -1,0 +1,103 @@
+war:
+  declare:
+    min-town-age-days: 1
+  preparation-hours: 0
+  combat:
+    timezone: "Europe/Moscow"
+    window:
+      start: "16:00"
+      end: "20:30"
+  points:
+    default: 250
+    min-total: 250
+    max-total: 2500
+    death-mayor: 10
+    death-resident: 5
+  capture:
+    flag-durability: 30
+    capture-seconds: 120
+    min-y: 0
+    max-y: 96
+    default-max-concurrent-per-town: 1
+  surrender:
+    flag-durability: 150
+    surrender-seconds: 1800
+  assault-tnt:
+    durability: 30
+    fuse-seconds: 30
+    max-per-chunk: 8
+    explosion-power: 4.0
+  negotiation:
+    window-minutes: 5
+  tribute:
+    percent: 10
+    hour: 13
+    minute: 0
+  glow:
+    radius: 48
+  blocked-commands:
+    - "delete"
+    - "merge"
+    - "withdraw"
+    - "unclaim"
+    - "claim"
+    - "rename"
+    - "set name"
+    - "set tag"
+    - "set mayor"
+    - "set homeblock"
+    - "set spawn"
+    - "toggle pvp"
+    - "toggle explosion"
+warshop:
+  inspiration:
+    cost: 10000
+    cooldown-minutes: 60
+    duration-minutes: 10
+    damage-bonus-percent: 3
+  truce:
+    cost: 15000
+    cooldown-minutes: 60
+    duration-minutes: 10
+  mercenaries:
+    cost: 25000
+    cooldown-minutes: 90
+    points: 50
+database:
+  host: localhost
+  port: 3306
+  name: townywar
+  user: root
+  password: ""
+  pool-size: 10
+  use-ssl: false
+  connection-timeout-ms: 10000
+messages:
+  prefix: "<dark_gray>[<red>Война</red>]</dark_gray> "
+  no-permission: "<red>Недостаточно прав.</red>"
+  not-in-town: "<red>Вы не состоите в городе.</red>"
+  not-mayor: "<red>Только мэр может это делать.</red>"
+  town-not-found: "<red>Город <yellow><town></yellow> не найден.</red>"
+  self-war: "<red>Нельзя объявить войну самому себе.</red>"
+  same-nation: "<red>Нельзя объявить войну городу из своей нации.</red>"
+  neutral: "<red>Цель или ваш город под нейтралитетом.</red>"
+  already-at-war: "<red>Ваш город уже участвует в войне.</red>"
+  target-at-war: "<red>Целевой город уже участвует в войне.</red>"
+  town-too-young: "<red>Город слишком молод. Подождите ещё <yellow><days></yellow> дн.</red>"
+  declare-failed: "<red>Не удалось объявить войну (ошибка БД).</red>"
+  war-declared: "<green>Война объявлена городу <yellow><target></yellow>. Оправдание идёт.</green>"
+  war-declared-defender: "<red>Город <yellow><attacker></yellow> объявил вам войну! Оправдание идёт.</red>"
+  no-war-to-cancel: "<red>Нет активной войны, где вы — агрессор.</red>"
+  cannot-cancel-phase: "<red>Отменить можно только в фазе оправдания.</red>"
+  war-cancelled: "<green>Война отменена.</green>"
+  usage-war: "<yellow>/t war <город></yellow> | <yellow>/t war cancel</yellow> | <yellow>/t war glow on|off</yellow>"
+  usage-glow: "<yellow>/t war glow on|off</yellow>"
+  glow-on: "<green>Подсветка включена.</green>"
+  glow-off: "<red>Подсветка выключена.</red>"
+  phase-combat-start: "<red>Оправдание окончено! Города <yellow><attacker></yellow> и <yellow><defender></yellow> вступили в бой.</red>"
+  negotiation-start: "<gold>Победа определена! Мэр победителя имеет <yellow><minutes></yellow> минут на <yellow>/t negotiation</yellow>.</gold>"
+  war-ended: "<gray>Война между <yellow><attacker></yellow> и <yellow><defender></yellow> завершена.</gray>"
+  prep-attacker-join: "<red>Ваш город ведёт оправдание войны против другого города.</red>"
+  prep-defender-join: "<red>На ваш город ведётся оправдание войны.</red>"
+  warshop-success: "<green>Вы успешно купили <yellow><item></yellow>.</green>"
+  warshop-truce-start: "<gold>Война между <yellow><attacker></yellow> и <yellow><defender></yellow> остановлена на <yellow><minutes></yellow> мин. — перемирие.</gold>"
