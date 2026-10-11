@@ -18,7 +18,7 @@ import org.jetbrains.annotations.Nullable;
 public interface TownyWarAPI {
 
     /** Текущая версия контракта. Растёт при ломающих изменениях. */
-    int API_VERSION = 1;
+    int API_VERSION = 2;
 
     int getApiVersion();
 
@@ -62,4 +62,36 @@ public interface TownyWarAPI {
     boolean removePoints(@NotNull String town, int amount, @NotNull String actor);
 
     boolean setPoints(@NotNull String town, int points, @NotNull String actor);
+
+    // ===== Per-town оверрайды очков за убийство =====
+
+    /**
+     * Очки, снимаемые с города при убийстве его мэра в бою.
+     * Возвращается <b>эффективное</b> значение: per-town оверрайд,
+     * если задан, иначе значение из config.yml.
+     */
+    int getEffectiveDeathMayorPoints(@NotNull String town);
+
+    int getEffectiveDeathResidentPoints(@NotNull String town);
+
+    /**
+     * Per-town оверрайд очков за убийство мэра города.
+     * <p>
+     * {@code null} — сбросить оверрайд и вернуться к config.yml.
+     * Значение клампится в [0, 100000].
+     * <p>
+     * Семантика: "у города X мэр стоит N очков". Применяется, когда
+     * погибает мэр города X. То есть оверрайд привязан к городу-жертве,
+     * а не к городу-убийце.
+     * <p>
+     * Возвращает false, если город не зарегистрирован в Towny.
+     */
+    boolean setDeathMayorPoints(@NotNull String town, @Nullable Integer value, @NotNull String actor);
+
+    boolean setDeathResidentPoints(@NotNull String town, @Nullable Integer value, @NotNull String actor);
+
+    /** Текущий оверрайд или null, если не задан. */
+    @Nullable Integer getDeathMayorOverride(@NotNull String town);
+
+    @Nullable Integer getDeathResidentOverride(@NotNull String town);
 }

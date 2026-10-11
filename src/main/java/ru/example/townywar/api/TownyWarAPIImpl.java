@@ -75,4 +75,34 @@ public final class TownyWarAPIImpl implements TownyWarAPI {
         warManager.setPointsAdmin(town, points, actor);
         return true;
     }
+
+    // ===== Per-town оверрайды очков за убийство =====
+
+    @Override public int getEffectiveDeathMayorPoints(@NotNull String town) {
+        return warManager.getEffectiveDeathMayor(town);
+    }
+
+    @Override public int getEffectiveDeathResidentPoints(@NotNull String town) {
+        return warManager.getEffectiveDeathResident(town);
+    }
+
+    @Override public boolean setDeathMayorPoints(@NotNull String town,
+                                                 @Nullable Integer value,
+                                                 @NotNull String actor) {
+        return warManager.setDeathMayorPoints(town, value, actor);
+    }
+
+    @Override public boolean setDeathResidentPoints(@NotNull String town,
+                                                    @Nullable Integer value,
+                                                    @NotNull String actor) {
+        return warManager.setDeathResidentPoints(town, value, actor);
+    }
+
+    @Override @Nullable public Integer getDeathMayorOverride(@NotNull String town) {
+        return warManager.getDeathMayorPoints(town);
+    }
+
+    @Override @Nullable public Integer getDeathResidentOverride(@NotNull String town) {
+        return warManager.getDeathResidentPoints(town);
+    }
 }

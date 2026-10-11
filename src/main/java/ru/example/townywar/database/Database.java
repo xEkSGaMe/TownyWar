@@ -104,7 +104,10 @@ public final class Database {
             st.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS town_war_settings (
                   town VARCHAR(64) PRIMARY KEY,
-                  max_concurrent_capture_flags INT NOT NULL DEFAULT 1
+                  max_concurrent_capture_flags INT NOT NULL DEFAULT 1,
+                  starting_points_bonus INT NOT NULL DEFAULT 0,
+                  death_mayor_override INT NULL,
+                  death_resident_override INT NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """);
             st.executeUpdate("""
@@ -159,6 +162,12 @@ public final class Database {
                     "ALTER TABLE town_war_settings ADD COLUMN starting_points_bonus INT NOT NULL DEFAULT 0");
             ensureColumn(con, "placed_flags", "placed_by",
                     "ALTER TABLE placed_flags ADD COLUMN placed_by VARCHAR(64) NULL");
+
+            // NEW: per-town оверрайды очков за убийство
+            ensureColumn(con, "town_war_settings", "death_mayor_override",
+                    "ALTER TABLE town_war_settings ADD COLUMN death_mayor_override INT NULL");
+            ensureColumn(con, "town_war_settings", "death_resident_override",
+                    "ALTER TABLE town_war_settings ADD COLUMN death_resident_override INT NULL");
         }
     }
 

@@ -34,6 +34,9 @@ public final class WarManager {
     /** Верхняя граница лимита флагов захвата — синхронно с admin-командой. */
     private static final int MAX_CAPTURE_FLAGS_UPPER = 64;
 
+    /** Верхняя граница per-town оверрайда (защита от абсурдных значений). */
+    private static final int DEATH_POINTS_MAX = 100_000;
+
     private final JavaPlugin plugin;
     private final WarRepository repo;
     private final WarLogRepository log;
@@ -45,6 +48,8 @@ public final class WarManager {
     private final Map<String, Long> townToWar = new ConcurrentHashMap<>();
     private final Map<String, Integer> maxFlagsOverride = new ConcurrentHashMap<>();
     private final Map<String, Integer> startingBonusOverride = new ConcurrentHashMap<>();
+    private final Map<String, Integer> deathMayorOverride = new ConcurrentHashMap<>();
+    private final Map<String, Integer> deathResidentOverride = new ConcurrentHashMap<>();
     private BukkitTask ticker;
 
     /** Очередь событий, отложенных до конца tick-итерации. */
@@ -93,6 +98,8 @@ public final class WarManager {
     public void loadTownSettings() {
         maxFlagsOverride.clear();
         startingBonusOverride.clear();
+        deathMayorOverride.clear();
+        deathResidentOverride.clear();
         for (var e : townSettings.loadAll().entrySet()) {
             String key = e.getKey();
             var s = e.getValue();
@@ -101,6 +108,12 @@ public final class WarManager {
             }
             if (s.startingBonus() != 0) {
                 startingBonusOverride.put(key, s.startingBonus());
+            }
+            if (s.deathMayorOverride() != null) {
+                deathMayorOverride.put(key, s.deathMayorOverride());
+            }
+            if (s.deathResidentOverride() != null) {
+                deathResidentOverride.put(key, s.deathResidentOverride());
             }
         }
     }
@@ -144,9 +157,6 @@ public final class WarManager {
                     }
                     case COMBAT -> {
                         if (w.getAttackerPoints() <= 0 || w.getDefenderPoints() <= 0) {
-                            // D3: явный trigger, чтобы по логу было видно причину
-                            // перехода COMBAT → NEGOTIATION без корреляции с
-                            // предыдущими событиями.
                             log.log(w.getId(), null, "NEGOTIATION_TRIGGER", "cause=points-zero");
                             startNegotiation(w);
                         }
@@ -170,16 +180,6 @@ public final class WarManager {
         }
     }
 
-    /**
-     * Обработка истечения окна переговоров.
-     * <p>
-     * A9: если NegotiationManager уже применяет исход этой войны (например,
-     * идёт батч-аннексия чанков), мы НЕ дёргаем applyOutcome повторно и НЕ
-     * форсим endWar — иначе прервём перенос на середине. Ждём, пока фоновый
-     * процесс сам завершит войну через endWar(...).
-     * <p>
-     * В остальных случаях применяем TRIBUTE-fallback и завершаем войну.
-     */
     private void handleNegotiationTimeout(War w) {
         NegotiationManager nm = this.negotiationManager;
         if (nm != null) {
@@ -224,11 +224,6 @@ public final class WarManager {
         return maxFlagsOverride.getOrDefault(name.toLowerCase(), config.getCaptureDefaultMaxPerTown());
     }
 
-    /**
-     * Итоговые стартовые очки для города при объявлении войны.
-     * base (config default) + bonus, клампится в [min-total, max-total].
-     * Если бонус не задан — возвращается база.
-     */
     public int getStartingPoints(String townName) {
         int base = config.getDefaultPoints();
         int bonus = townName == null ? 0
@@ -244,6 +239,87 @@ public final class WarManager {
     private int clampTotal(int v) {
         return Math.max(config.getMinTotalPoints(),
                 Math.min(config.getMaxTotalPoints(), v));
+    }
+
+    // ===== Per-town оверрайды очков за убийство =====
+
+    /**
+     * Возвращает эффективное значение очков, снимаемых с города-жертвы
+     * при убийстве его мэра. Если per-town оверрайда нет — берётся из config.yml.
+     */
+    public int getEffectiveDeathMayor(String townName) {
+        if (townName == null) return config.getDeathMayor();
+        Integer o = deathMayorOverride.get(townName.toLowerCase());
+        return o != null ? o : config.getDeathMayor();
+    }
+
+    public int getEffectiveDeathResident(String townName) {
+        if (townName == null) return config.getDeathResident();
+        Integer o = deathResidentOverride.get(townName.toLowerCase());
+        return o != null ? o : config.getDeathResident();
+    }
+
+    /** Per-town оверрайд или null, если не задан. */
+    @Nullable public Integer getDeathMayorPoints(String townName) {
+        if (townName == null) return null;
+        return deathMayorOverride.get(townName.toLowerCase());
+    }
+
+    @Nullable public Integer getDeathResidentPoints(String townName) {
+        if (townName == null) return null;
+        return deathResidentOverride.get(townName.toLowerCase());
+    }
+
+    /**
+     * Устанавливает оверрайд очков за убийство мэра города.
+     * {@code value == null} — сброс к значению из config.yml.
+     * Клампится в [0, DEATH_POINTS_MAX].
+     * Возвращает false, если город не найден в Towny.
+     */
+    public synchronized boolean setDeathMayorPoints(String townName, Integer value, String actor) {
+        if (townName == null || townName.isBlank()) return false;
+        if (!townExists(townName)) {
+            plugin.getLogger().warning("[WarManager] setDeathMayorPoints: город '"
+                    + townName + "' не найден в Towny.");
+            return false;
+        }
+        String key = townName.toLowerCase();
+        Integer old = deathMayorOverride.get(key);
+        if (value == null) {
+            deathMayorOverride.remove(key);
+        } else {
+            deathMayorOverride.put(key, clampDeathPoints(value));
+        }
+        persistTownSettings(key);
+        log.log(null, actor, "ADMIN_SET_DEATH_MAYOR",
+                "town=" + townName + ";old=" + old + ";new=" + value);
+        return true;
+    }
+
+    public synchronized boolean setDeathResidentPoints(String townName, Integer value, String actor) {
+        if (townName == null || townName.isBlank()) return false;
+        if (!townExists(townName)) {
+            plugin.getLogger().warning("[WarManager] setDeathResidentPoints: город '"
+                    + townName + "' не найден в Towny.");
+            return false;
+        }
+        String key = townName.toLowerCase();
+        Integer old = deathResidentOverride.get(key);
+        if (value == null) {
+            deathResidentOverride.remove(key);
+        } else {
+            deathResidentOverride.put(key, clampDeathPoints(value));
+        }
+        persistTownSettings(key);
+        log.log(null, actor, "ADMIN_SET_DEATH_RESIDENT",
+                "town=" + townName + ";old=" + old + ";new=" + value);
+        return true;
+    }
+
+    private static int clampDeathPoints(int v) {
+        if (v < 0) return 0;
+        if (v > DEATH_POINTS_MAX) return DEATH_POINTS_MAX;
+        return v;
     }
 
     @Nullable public War declare(String attacker, String defender) {
@@ -274,13 +350,6 @@ public final class WarManager {
         endWar(w, winner, reason, true);
     }
 
-    /**
-     * A1/A8: при завершении войны (любым путём) снимаем все её флаги —
-     * визуал, индексы в FlagManager, строки в placed_flags.
-     * Assault TNT: та же логика — снимаем все TNT этой войны (визуал,
-     * индексы, строки в assault_tnt).
-     * A3: освобождаем executor войны после финального repo.update(w).
-     */
     public void endWar(War w, String winner, String reason, boolean announce) {
         boolean wasActive = w.getPhase() != WarPhase.ENDED;
         if (wasActive) {
@@ -314,11 +383,6 @@ public final class WarManager {
         }
     }
 
-    /**
-     * A2: перегрузка без явного победителя. Используется тикером, когда
-     * очки одной из сторон дошли до 0 — там победитель выводится из
-     * состояния очков.
-     */
     public void startNegotiation(War w) {
         if (w.getPhase() == WarPhase.NEGOTIATION || w.getPhase() == WarPhase.ENDED) return;
         if (w.getAttackerPoints() <= 0 && w.getDefenderPoints() <= 0) {
@@ -330,14 +394,6 @@ public final class WarManager {
         startNegotiation(w, winner);
     }
 
-    /**
-     * A2: перегрузка с явным победителем. Используется флагом капитуляции —
-     * победитель определяется по стороне, установившей флаг, а не по очкам.
-     * <p>
-     * Флаги здесь не трогаем: их удалит FlagManager.tick() на следующем тике
-     * (фаза перестанет быть COMBAT) либо endWar, если война завершится
-     * немедленно.
-     */
     public void startNegotiation(War w, String winner) {
         if (w.getPhase() == WarPhase.NEGOTIATION || w.getPhase() == WarPhase.ENDED) return;
         if (winner == null) {
@@ -387,11 +443,6 @@ public final class WarManager {
         if (w.getAttackerPoints() <= 0 || w.getDefenderPoints() <= 0) startNegotiation(w);
     }
 
-    /**
-     * Устанавливает лимит одновременных Флагов Захвата для города.
-     * Клампит в [1, 64]. Возвращает false, если город не найден в Towny
-     * или имя пустое — в этом случае ничего не меняется.
-     */
     public synchronized boolean setMaxConcurrentFlags(String townName, int count, String actor) {
         if (townName == null || townName.isBlank()) return false;
         if (!townExists(townName)) {
@@ -415,15 +466,6 @@ public final class WarManager {
         return true;
     }
 
-    /**
-     * Атомарно прибавляет delta к бонусу стартовых очков города.
-     * В отличие от {@link #setStartingBonus(String, int, String)} — не
-     * перезаписывает, а суммирует с текущим бонусом.
-     * <p>
-     * Возвращает false, если город не найден в Towny или итог
-     * (default + newBonus) выходит за [min-total, max-total] — тогда
-     * ничего не меняется.
-     */
     public synchronized boolean addStartingBonus(String townName, int delta, String actor) {
         if (townName == null || townName.isBlank()) return false;
         if (!townExists(townName)) {
@@ -452,13 +494,6 @@ public final class WarManager {
         return true;
     }
 
-    /**
-     * Устанавливает абсолютное значение бонуса. Используется админ-командой
-     * /twar admin setbonus и внешними вызовами, где нужен именно «set».
-     * <p>
-     * ВАЖНО: параметр newBonus — это целевое значение бонуса, а не дельта.
-     * Для сложения использовать {@link #addStartingBonus(String, int, String)}.
-     */
     public synchronized boolean setStartingBonus(String townName, int newBonus, String actor) {
         if (townName == null || townName.isBlank()) return false;
         if (!townExists(townName)) {
@@ -486,16 +521,24 @@ public final class WarManager {
     }
 
     /**
-     * Синхронизация кэша с БД. Если оба поля вернулись к дефолтам —
+     * Синхронизация кэша с БД. Если все четыре поля вернулись к дефолтам —
      * удаляем строку, иначе upsert с актуальными значениями.
      */
     private void persistTownSettings(String key) {
         int maxFlags = maxFlagsOverride.getOrDefault(key, config.getCaptureDefaultMaxPerTown());
         int bonus = startingBonusOverride.getOrDefault(key, 0);
-        if (maxFlags == config.getCaptureDefaultMaxPerTown() && bonus == 0) {
+        Integer deathMayor = deathMayorOverride.get(key);
+        Integer deathResident = deathResidentOverride.get(key);
+
+        boolean allDefault = maxFlags == config.getCaptureDefaultMaxPerTown()
+                && bonus == 0
+                && deathMayor == null
+                && deathResident == null;
+
+        if (allDefault) {
             townSettings.delete(key);
         } else {
-            townSettings.upsert(key, maxFlags, bonus);
+            townSettings.upsert(key, maxFlags, bonus, deathMayor, deathResident);
         }
     }
 
@@ -506,11 +549,6 @@ public final class WarManager {
         endWar(w, null, reason);
     }
 
-    /**
-     * B5: defense in depth. Даже если командный слой забудет провалидировать,
-     * здесь не создаём войну с одинаковыми / пустыми именами и не допускаем
-     * повторного объявления при активной войне.
-     */
     @Nullable public War adminDeclare(String attacker, String defender, String actor) {
         if (attacker == null || defender == null) return null;
         if (attacker.isBlank() || defender.isBlank()) return null;
@@ -521,18 +559,6 @@ public final class WarManager {
         return w;
     }
 
-    /**
-     * B4: при переводе в NEGOTIATION обязательно должен быть winnerTown —
-     * иначе NegotiationCommand не пустит мэра в меню, а таймаут применит
-     * TRIBUTE с winner == null и зациклит endWar.
-     * <p>
-     * При переводе в COMBAT очищаем negotiation-поля, чтобы повторный
-     * переход в NEGOTIATION не дал мгновенный таймаут (negotiationEndsAt
-     * уже в прошлом).
-     * <p>
-     * При переводе в PREPARATION откатываем всё, что относится к поздним
-     * фазам.
-     */
     public boolean setPhase(String town, WarPhase phase, String actor) {
         War w = getWar(town);
         if (w == null || w.getPhase() == WarPhase.ENDED) return false;
@@ -578,12 +604,6 @@ public final class WarManager {
         return null;
     }
 
-    /**
-     * Проверяет, что город зарегистрирован в Towny.
-     * При падении/перезагрузке Towny возвращает true, чтобы не блокировать
-     * административные вызовы — БД-инварианты это не ломает, а ложное
-     * отклонение было бы хуже.
-     */
     private boolean townExists(String name) {
         try {
             return TownyAPI.getInstance().getTown(name) != null;
@@ -596,15 +616,6 @@ public final class WarManager {
 
     // ===== Event dispatch =====
 
-    /**
-     * Публикует Bukkit-событие.
-     * <ul>
-     *   <li>Если вызов не в main-thread — уходит в scheduler main-таска.</li>
-     *   <li>Если мы внутри {@link #tick()} — откладывается до конца итерации,
-     *       чтобы слушатель не мутировал {@code activeWars} во время обхода.</li>
-     *   <li>Иначе — публикуется сразу.</li>
-     * </ul>
-     */
     private void fireEvent(Event event) {
         Runnable dispatch = () -> {
             try {

@@ -62,6 +62,19 @@ public final class TownyWarCommandRegistrar {
                         .then(Commands.literal("getbonus")
                                 .then(Commands.argument("town", StringArgumentType.string())
                                         .executes(this::getBonus)))
+                        .then(Commands.literal("setdeathpoints")
+                                .then(Commands.argument("town", StringArgumentType.string())
+                                        .then(Commands.argument("role", StringArgumentType.word())
+                                                .suggests((ctx, b) -> {
+                                                    b.suggest("mayor");
+                                                    b.suggest("resident");
+                                                    return b.buildFuture();
+                                                })
+                                                .then(Commands.argument("value", IntegerArgumentType.integer(0, 100000))
+                                                        .executes(this::setDeathPoints)))))
+                        .then(Commands.literal("cleardeathpoints")
+                                .then(Commands.argument("town", StringArgumentType.string())
+                                        .executes(this::clearDeathPoints)))
                         .then(Commands.literal("declare")
                                 .then(Commands.argument("attacker", StringArgumentType.string())
                                         .then(Commands.argument("defender", StringArgumentType.string())
@@ -107,6 +120,8 @@ public final class TownyWarCommandRegistrar {
         s.sendMessage(MM.deserialize("<yellow>/twar admin setbonus <город> <delta></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin addbonus <город> <delta></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin getbonus <город></yellow>"));
+        s.sendMessage(MM.deserialize("<yellow>/twar admin setdeathpoints <город> <mayor|resident> <n></yellow>"));
+        s.sendMessage(MM.deserialize("<yellow>/twar admin cleardeathpoints <город></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin declare <атакующий> <защитник></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin cancel <город></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin end <город> [причина]</yellow>"));
@@ -226,6 +241,59 @@ public final class TownyWarCommandRegistrar {
                 "<gray>Город <yellow>" + town + "</yellow>: база <white>" + base
                         + "</white>, бонус <white>" + sign + bonus
                         + "</white>, итог <gold>" + total + "</gold>.</gray>"));
+        return 1;
+    }
+
+    // ===== Per-town оверрайды очков за убийство =====
+
+    private int setDeathPoints(CommandContext<CommandSourceStack> ctx) {
+        String town = StringArgumentType.getString(ctx, "town");
+        String role = StringArgumentType.getString(ctx, "role").toLowerCase(Locale.ROOT);
+        int value = IntegerArgumentType.getInteger(ctx, "value");
+        WarManager wm = TownyWarPlugin.get().getWarManager();
+
+        boolean ok;
+        String what;
+        if (role.equals("mayor")) {
+            ok = wm.setDeathMayorPoints(town, value, actor(ctx));
+            what = "мэра";
+        } else if (role.equals("resident")) {
+            ok = wm.setDeathResidentPoints(town, value, actor(ctx));
+            what = "жителя";
+        } else {
+            ctx.getSource().getSender().sendMessage(MM.deserialize(
+                    "<red>Роль должна быть <yellow>mayor</yellow> или <yellow>resident</yellow>.</red>"));
+            return 0;
+        }
+
+        if (!ok) {
+            ctx.getSource().getSender().sendMessage(MM.deserialize(
+                    "<red>Город <yellow>" + town + "</yellow> не найден в Towny.</red>"));
+            return 0;
+        }
+
+        ctx.getSource().getSender().sendMessage(MM.deserialize(
+                "<green>Убийство " + what + " города <yellow>" + town
+                        + "</yellow> теперь стоит <yellow>" + value + "</yellow> очков.</green>"));
+        return 1;
+    }
+
+    private int clearDeathPoints(CommandContext<CommandSourceStack> ctx) {
+        String town = StringArgumentType.getString(ctx, "town");
+        WarManager wm = TownyWarPlugin.get().getWarManager();
+
+        boolean okM = wm.setDeathMayorPoints(town, null, actor(ctx));
+        boolean okR = wm.setDeathResidentPoints(town, null, actor(ctx));
+
+        if (!okM && !okR) {
+            ctx.getSource().getSender().sendMessage(MM.deserialize(
+                    "<red>Город <yellow>" + town + "</yellow> не найден в Towny.</red>"));
+            return 0;
+        }
+
+        ctx.getSource().getSender().sendMessage(MM.deserialize(
+                "<green>Оверрайды очков за убийство для <yellow>" + town
+                        + "</yellow> сброшены к значениям config.yml.</green>"));
         return 1;
     }
 

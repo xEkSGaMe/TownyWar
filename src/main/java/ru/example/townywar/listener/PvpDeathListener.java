@@ -19,15 +19,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Обработчик смертей во время войны.
- * <p>
- * Считаются <b>только PvP-убийства</b> — то есть случаи, когда
- * {@link Player#getKiller()} возвращает игрока-убийцу.
- * <p>
- * Warshop: пока активно Перемирие — очки не двигаются вообще,
- * независимо от типа смерти.
- */
 public final class PvpDeathListener implements Listener {
 
     private static final long DOUBLE_FIRE_GUARD_MS = 2_000L;
@@ -38,7 +29,6 @@ public final class PvpDeathListener implements Listener {
     private final CombatWindowManager windowManager;
     private final Map<UUID, Long> recentDeaths = new ConcurrentHashMap<>();
 
-    /** D4: handle периодической чистки, чтобы можно было отменить при выключении. */
     private final BukkitTask cleanupTask;
 
     public PvpDeathListener(TownyWarPlugin plugin, WarManager warManager, CombatWindowManager windowManager) {
@@ -56,7 +46,6 @@ public final class PvpDeathListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onDeath(PlayerDeathEvent event) {
-        // Очки двигаются только в боевое окно.
         if (!windowManager.isCombatWindowActive()) return;
 
         Player victim = event.getEntity();
@@ -79,7 +68,6 @@ public final class PvpDeathListener implements Listener {
         War war = warManager.getWar(victimTown.getName());
         if (war == null || war.getPhase() != WarPhase.COMBAT) return;
 
-        // Warshop: перемирие — очки не двигаются.
         if (plugin.getWarshopManager() != null
                 && plugin.getWarshopManager().isTruceActive(war.getId())) return;
 
@@ -90,15 +78,13 @@ public final class PvpDeathListener implements Listener {
 
         boolean isMayor = plugin.getTownyHook().isMayor(victimTown, victim);
         int delta = isMayor
-                ? plugin.getConfigManager().getDeathMayor()
-                : plugin.getConfigManager().getDeathResident();
+                ? warManager.getEffectiveDeathMayor(victimTown.getName())
+                : warManager.getEffectiveDeathResident(victimTown.getName());
 
         warManager.changePoints(war, victimSide, -delta);
         plugin.getWarLogRepository().log(war.getId(), killer.getName(), "PVP_KILL",
                 "victim=" + victim.getName() + ";victimTown=" + victimTown.getName()
                         + ";mayor=" + isMayor + ";delta=" + delta);
-        // Зеркальная запись: в статистику смерти идёт так же, как и убийство,
-        // чтобы вклад каждой стороны считался симметрично.
         plugin.getWarLogRepository().log(war.getId(), victim.getName(), "PVP_DEATH",
                 "killer=" + killer.getName() + ";victimTown=" + victimTown.getName()
                         + ";mayor=" + isMayor + ";delta=" + delta);
