@@ -1,9 +1,16 @@
 package ru.example.townywar.war;
 
+import com.palmergames.bukkit.towny.TownyAPI;
 import org.bukkit.Bukkit;
+import org.bukkit.event.Event;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Nullable;
+import ru.example.townywar.api.WarSnapshot;
+import ru.example.townywar.api.event.TownStartingBonusChangeEvent;
+import ru.example.townywar.api.event.WarDeclaredEvent;
+import ru.example.townywar.api.event.WarEndedEvent;
+import ru.example.townywar.api.event.WarPhaseChangeEvent;
 import ru.example.townywar.assault.AssaultTntManager;
 import ru.example.townywar.config.ConfigManager;
 import ru.example.townywar.config.MessagesManager;
@@ -24,6 +31,9 @@ import java.util.logging.Level;
 
 public final class WarManager {
 
+    /** Верхняя граница лимита флагов захвата — синхронно с admin-командой. */
+    private static final int MAX_CAPTURE_FLAGS_UPPER = 64;
+
     private final JavaPlugin plugin;
     private final WarRepository repo;
     private final WarLogRepository log;
@@ -36,6 +46,10 @@ public final class WarManager {
     private final Map<String, Integer> maxFlagsOverride = new ConcurrentHashMap<>();
     private final Map<String, Integer> startingBonusOverride = new ConcurrentHashMap<>();
     private BukkitTask ticker;
+
+    /** Очередь событий, отложенных до конца tick-итерации. */
+    private final List<Runnable> pendingEvents = new ArrayList<>();
+    private boolean inTick = false;
 
     /** Устанавливается из TownyWarPlugin.onEnable() после создания NegotiationManager. */
     private volatile NegotiationManager negotiationManager;
@@ -108,43 +122,51 @@ public final class WarManager {
     }
 
     private void tick() {
-        long now = System.currentTimeMillis();
+        inTick = true;
+        try {
+            long now = System.currentTimeMillis();
 
-        List<War> negotiationTimeouts = null;
+            List<War> negotiationTimeouts = null;
 
-        for (War w : activeWars.values()) {
-            switch (w.getPhase()) {
-                case PREPARATION -> {
-                    if (now >= w.getPrepEndsAt()) {
-                        w.setPhase(WarPhase.COMBAT);
-                        w.setCombatStartedAt(now);
-                        repo.update(w);
-                        log.log(w.getId(), null, "PHASE_COMBAT", null);
-                        Bukkit.getServer().sendMessage(messages.format("phase-combat-start",
-                                "attacker", w.getAttackerTown(), "defender", w.getDefenderTown()));
+            for (War w : activeWars.values()) {
+                switch (w.getPhase()) {
+                    case PREPARATION -> {
+                        if (now >= w.getPrepEndsAt()) {
+                            String oldPhase = w.getPhase().name();
+                            w.setPhase(WarPhase.COMBAT);
+                            w.setCombatStartedAt(now);
+                            repo.update(w);
+                            log.log(w.getId(), null, "PHASE_COMBAT", null);
+                            fireEvent(new WarPhaseChangeEvent(w.snapshot(), oldPhase, "COMBAT"));
+                            Bukkit.getServer().sendMessage(messages.format("phase-combat-start",
+                                    "attacker", w.getAttackerTown(), "defender", w.getDefenderTown()));
+                        }
                     }
-                }
-                case COMBAT -> {
-                    if (w.getAttackerPoints() <= 0 || w.getDefenderPoints() <= 0) {
-                        // D3: явный trigger, чтобы по логу было видно причину
-                        // перехода COMBAT → NEGOTIATION без корреляции с
-                        // предыдущими событиями.
-                        log.log(w.getId(), null, "NEGOTIATION_TRIGGER", "cause=points-zero");
-                        startNegotiation(w);
+                    case COMBAT -> {
+                        if (w.getAttackerPoints() <= 0 || w.getDefenderPoints() <= 0) {
+                            // D3: явный trigger, чтобы по логу было видно причину
+                            // перехода COMBAT → NEGOTIATION без корреляции с
+                            // предыдущими событиями.
+                            log.log(w.getId(), null, "NEGOTIATION_TRIGGER", "cause=points-zero");
+                            startNegotiation(w);
+                        }
                     }
-                }
-                case NEGOTIATION -> {
-                    if (w.getNegotiationEndsAt() != null && now >= w.getNegotiationEndsAt()) {
-                        if (negotiationTimeouts == null) negotiationTimeouts = new ArrayList<>(2);
-                        negotiationTimeouts.add(w);
+                    case NEGOTIATION -> {
+                        if (w.getNegotiationEndsAt() != null && now >= w.getNegotiationEndsAt()) {
+                            if (negotiationTimeouts == null) negotiationTimeouts = new ArrayList<>(2);
+                            negotiationTimeouts.add(w);
+                        }
                     }
+                    default -> { }
                 }
-                default -> { }
             }
-        }
 
-        if (negotiationTimeouts != null) {
-            for (War w : negotiationTimeouts) handleNegotiationTimeout(w);
+            if (negotiationTimeouts != null) {
+                for (War w : negotiationTimeouts) handleNegotiationTimeout(w);
+            }
+        } finally {
+            inTick = false;
+            flushPendingEvents();
         }
     }
 
@@ -238,6 +260,11 @@ public final class WarManager {
         townToWar.put(defender.toLowerCase(), w.getId());
         log.log(w.getId(), null, "WAR_DECLARED",
                 "attacker=" + attacker + ";defender=" + defender);
+
+        WarSnapshot snap = w.snapshot();
+        fireEvent(new WarDeclaredEvent(snap));
+        fireEvent(new WarPhaseChangeEvent(snap, WarPhaseChangeEvent.NONE, "PREPARATION"));
+
         return w;
     }
 
@@ -257,12 +284,17 @@ public final class WarManager {
     public void endWar(War w, String winner, String reason, boolean announce) {
         boolean wasActive = w.getPhase() != WarPhase.ENDED;
         if (wasActive) {
+            String oldPhase = w.getPhase().name();
             w.setPhase(WarPhase.ENDED);
             w.setEndedAt(System.currentTimeMillis());
             w.setWinnerTown(winner);
             w.setOutcome(reason);
             repo.update(w);
             log.log(w.getId(), null, "WAR_ENDED", "winner=" + winner + ";reason=" + reason);
+
+            WarSnapshot snap = w.snapshot();
+            fireEvent(new WarPhaseChangeEvent(snap, oldPhase, "ENDED"));
+            fireEvent(new WarEndedEvent(snap, winner, reason));
         }
         activeWars.remove(w.getId());
         townToWar.remove(w.getAttackerTown().toLowerCase(), w.getId());
@@ -312,11 +344,13 @@ public final class WarManager {
             plugin.getLogger().warning("startNegotiation: winner == null для войны #" + w.getId());
             return;
         }
+        String oldPhase = w.getPhase().name();
         w.setPhase(WarPhase.NEGOTIATION);
         w.setNegotiationEndsAt(System.currentTimeMillis() + config.getNegotiationMinutes() * 60_000L);
         w.setWinnerTown(winner);
         repo.update(w);
         log.log(w.getId(), null, "PHASE_NEGOTIATION", "winner=" + winner);
+        fireEvent(new WarPhaseChangeEvent(w.snapshot(), oldPhase, "NEGOTIATION"));
         Bukkit.getServer().sendMessage(messages.format("negotiation-start",
                 "minutes", String.valueOf(config.getNegotiationMinutes())));
     }
@@ -353,35 +387,101 @@ public final class WarManager {
         if (w.getAttackerPoints() <= 0 || w.getDefenderPoints() <= 0) startNegotiation(w);
     }
 
-    public void setMaxConcurrentFlags(String townName, int count, String actor) {
-        if (townName == null || count < 1) return;
+    /**
+     * Устанавливает лимит одновременных Флагов Захвата для города.
+     * Клампит в [1, 64]. Возвращает false, если город не найден в Towny
+     * или имя пустое — в этом случае ничего не меняется.
+     */
+    public synchronized boolean setMaxConcurrentFlags(String townName, int count, String actor) {
+        if (townName == null || townName.isBlank()) return false;
+        if (!townExists(townName)) {
+            plugin.getLogger().warning("[WarManager] setMaxConcurrentFlags: город '"
+                    + townName + "' не найден в Towny — лимит не установлен.");
+            return false;
+        }
+
+        int clamped = Math.max(1, Math.min(MAX_CAPTURE_FLAGS_UPPER, count));
         String key = townName.toLowerCase();
-        if (count == config.getCaptureDefaultMaxPerTown()) {
+
+        if (clamped == config.getCaptureDefaultMaxPerTown()) {
             maxFlagsOverride.remove(key);
         } else {
-            maxFlagsOverride.put(key, count);
+            maxFlagsOverride.put(key, clamped);
         }
         persistTownSettings(key);
-        log.log(null, actor, "ADMIN_SET_MAX_FLAGS", "town=" + townName + ";count=" + count);
+        log.log(null, actor, "ADMIN_SET_MAX_FLAGS",
+                "town=" + townName + ";count=" + clamped
+                        + (clamped != count ? ";requested=" + count : ""));
+        return true;
     }
 
     /**
-     * Устанавливает бонус стартовых очков. Возвращает false, если
-     * итог вышел за пределы [min-total, max-total] — в этом случае
-     * ничего не меняем, чтобы админ не получил «затихший» выход за границы.
+     * Атомарно прибавляет delta к бонусу стартовых очков города.
+     * В отличие от {@link #setStartingBonus(String, int, String)} — не
+     * перезаписывает, а суммирует с текущим бонусом.
+     * <p>
+     * Возвращает false, если город не найден в Towny или итог
+     * (default + newBonus) выходит за [min-total, max-total] — тогда
+     * ничего не меняется.
      */
-    public boolean setStartingBonus(String townName, int delta, String actor) {
+    public synchronized boolean addStartingBonus(String townName, int delta, String actor) {
         if (townName == null || townName.isBlank()) return false;
-        int total = config.getDefaultPoints() + delta;
+        if (!townExists(townName)) {
+            plugin.getLogger().warning("[WarManager] addStartingBonus: город '"
+                    + townName + "' не найден в Towny — бонус не начислен.");
+            return false;
+        }
+
+        String key = townName.toLowerCase();
+        int oldBonus = startingBonusOverride.getOrDefault(key, 0);
+        int newBonus = oldBonus + delta;
+        int total = config.getDefaultPoints() + newBonus;
+        if (total < config.getMinTotalPoints() || total > config.getMaxTotalPoints()) {
+            return false;
+        }
+        if (newBonus == 0) startingBonusOverride.remove(key);
+        else startingBonusOverride.put(key, newBonus);
+        persistTownSettings(key);
+        log.log(null, actor, "ADMIN_ADD_STARTING_BONUS",
+                "town=" + townName + ";delta=" + delta
+                        + ";bonus=" + newBonus + ";total=" + total);
+
+        if (oldBonus != newBonus) {
+            fireEvent(new TownStartingBonusChangeEvent(townName, oldBonus, newBonus, actor));
+        }
+        return true;
+    }
+
+    /**
+     * Устанавливает абсолютное значение бонуса. Используется админ-командой
+     * /twar admin setbonus и внешними вызовами, где нужен именно «set».
+     * <p>
+     * ВАЖНО: параметр newBonus — это целевое значение бонуса, а не дельта.
+     * Для сложения использовать {@link #addStartingBonus(String, int, String)}.
+     */
+    public synchronized boolean setStartingBonus(String townName, int newBonus, String actor) {
+        if (townName == null || townName.isBlank()) return false;
+        if (!townExists(townName)) {
+            plugin.getLogger().warning("[WarManager] setStartingBonus: город '"
+                    + townName + "' не найден в Towny — бонус не установлен.");
+            return false;
+        }
+
+        int total = config.getDefaultPoints() + newBonus;
         if (total < config.getMinTotalPoints() || total > config.getMaxTotalPoints()) return false;
 
         String key = townName.toLowerCase();
-        if (delta == 0) startingBonusOverride.remove(key);
-        else startingBonusOverride.put(key, delta);
+        int oldBonus = startingBonusOverride.getOrDefault(key, 0);
 
+        if (newBonus == 0) startingBonusOverride.remove(key);
+        else startingBonusOverride.put(key, newBonus);
         persistTownSettings(key);
         log.log(null, actor, "ADMIN_SET_STARTING_BONUS",
-                "town=" + townName + ";delta=" + delta + ";total=" + total);
+                "town=" + townName + ";bonus=" + newBonus + ";total=" + total);
+
+        if (oldBonus != newBonus) {
+            fireEvent(new TownStartingBonusChangeEvent(townName, oldBonus, newBonus, actor));
+        }
         return true;
     }
 
@@ -437,6 +537,7 @@ public final class WarManager {
         War w = getWar(town);
         if (w == null || w.getPhase() == WarPhase.ENDED) return false;
 
+        String oldPhase = w.getPhase().name();
         long now = System.currentTimeMillis();
         switch (phase) {
             case PREPARATION -> {
@@ -467,6 +568,7 @@ public final class WarManager {
         w.setPhase(phase);
         repo.update(w);
         log.log(w.getId(), actor, "ADMIN_SET_PHASE", "phase=" + phase.name());
+        fireEvent(new WarPhaseChangeEvent(w.snapshot(), oldPhase, phase.name()));
         return true;
     }
 
@@ -476,5 +578,63 @@ public final class WarManager {
         return null;
     }
 
+    /**
+     * Проверяет, что город зарегистрирован в Towny.
+     * При падении/перезагрузке Towny возвращает true, чтобы не блокировать
+     * административные вызовы — БД-инварианты это не ломает, а ложное
+     * отклонение было бы хуже.
+     */
+    private boolean townExists(String name) {
+        try {
+            return TownyAPI.getInstance().getTown(name) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
     public List<War> snapshotWars() { return List.copyOf(activeWars.values()); }
+
+    // ===== Event dispatch =====
+
+    /**
+     * Публикует Bukkit-событие.
+     * <ul>
+     *   <li>Если вызов не в main-thread — уходит в scheduler main-таска.</li>
+     *   <li>Если мы внутри {@link #tick()} — откладывается до конца итерации,
+     *       чтобы слушатель не мутировал {@code activeWars} во время обхода.</li>
+     *   <li>Иначе — публикуется сразу.</li>
+     * </ul>
+     */
+    private void fireEvent(Event event) {
+        Runnable dispatch = () -> {
+            try {
+                Bukkit.getPluginManager().callEvent(event);
+            } catch (Throwable t) {
+                plugin.getLogger().log(Level.SEVERE,
+                        "Event dispatch failed: " + event.getClass().getSimpleName(), t);
+            }
+        };
+
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(plugin, dispatch);
+            return;
+        }
+        if (inTick) {
+            pendingEvents.add(dispatch);
+            return;
+        }
+        dispatch.run();
+    }
+
+    private void flushPendingEvents() {
+        if (pendingEvents.isEmpty()) return;
+        List<Runnable> toRun = new ArrayList<>(pendingEvents);
+        pendingEvents.clear();
+        for (Runnable r : toRun) {
+            try { r.run(); }
+            catch (Throwable t) {
+                plugin.getLogger().log(Level.SEVERE, "Deferred event dispatch failed", t);
+            }
+        }
+    }
 }

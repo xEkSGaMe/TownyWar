@@ -55,6 +55,10 @@ public final class TownyWarCommandRegistrar {
                                 .then(Commands.argument("town", StringArgumentType.string())
                                         .then(Commands.argument("delta", IntegerArgumentType.integer())
                                                 .executes(this::setBonus))))
+                        .then(Commands.literal("addbonus")
+                                .then(Commands.argument("town", StringArgumentType.string())
+                                        .then(Commands.argument("delta", IntegerArgumentType.integer())
+                                                .executes(this::addBonus))))
                         .then(Commands.literal("getbonus")
                                 .then(Commands.argument("town", StringArgumentType.string())
                                         .executes(this::getBonus)))
@@ -101,6 +105,7 @@ public final class TownyWarCommandRegistrar {
         s.sendMessage(MM.deserialize("<yellow>/twar admin setpoints <город> <n></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin setmaxflags <город> <n></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin setbonus <город> <delta></yellow>"));
+        s.sendMessage(MM.deserialize("<yellow>/twar admin addbonus <город> <delta></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin getbonus <город></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin declare <атакующий> <защитник></yellow>"));
         s.sendMessage(MM.deserialize("<yellow>/twar admin cancel <город></yellow>"));
@@ -144,8 +149,22 @@ public final class TownyWarCommandRegistrar {
     private int setMaxFlags(CommandContext<CommandSourceStack> ctx) {
         String town = StringArgumentType.getString(ctx, "town");
         int count = IntegerArgumentType.getInteger(ctx, "count");
-        TownyWarPlugin.get().getWarManager().setMaxConcurrentFlags(town, count, actor(ctx));
-        ctx.getSource().getSender().sendMessage(MM.deserialize("<green>Для города <yellow>" + town + "</yellow> лимит флагов: <yellow>" + count + "</yellow>.</green>"));
+        WarManager wm = TownyWarPlugin.get().getWarManager();
+
+        if (!wm.setMaxConcurrentFlags(town, count, actor(ctx))) {
+            ctx.getSource().getSender().sendMessage(MM.deserialize(
+                    "<red>Не удалось установить лимит: город <yellow>" + town
+                            + "</yellow> не найден в Towny.</red>"));
+            return 0;
+        }
+
+        int actual = wm.getMaxConcurrentFlags(town);
+        String note = actual != count
+                ? " <gray>(запрошено " + count + ", кламп " + actual + ")</gray>"
+                : "";
+        ctx.getSource().getSender().sendMessage(MM.deserialize(
+                "<green>Для города <yellow>" + town + "</yellow> лимит флагов: <yellow>"
+                        + actual + "</yellow>." + note + "</green>"));
         return 1;
     }
 
@@ -158,9 +177,36 @@ public final class TownyWarCommandRegistrar {
             int max = TownyWarPlugin.get().getConfigManager().getMaxTotalPoints();
             int base = TownyWarPlugin.get().getConfigManager().getDefaultPoints();
             ctx.getSource().getSender().sendMessage(MM.deserialize(
-                    "<red>Недопустимо. Итог (" + (base + delta) + ") должен быть в [" + min + "; " + max + "].</red>"));
+                    "<red>Не удалось установить: либо город <yellow>" + town
+                            + "</yellow> не найден, либо итог (" + (base + delta)
+                            + ") вышел за [" + min + "; " + max + "].</red>"));
             return 0;
         }
+        int total = wm.getStartingPoints(town);
+        String sign = delta >= 0 ? "+" : "";
+        ctx.getSource().getSender().sendMessage(MM.deserialize(
+                "<green>Стартовые очки <yellow>" + town + "</yellow>: <yellow>" + total
+                        + "</yellow> (бонус <white>" + sign + delta + "</white>).</green>"));
+        return 1;
+    }
+
+    private int addBonus(CommandContext<CommandSourceStack> ctx) {
+        String town = StringArgumentType.getString(ctx, "town");
+        int delta = IntegerArgumentType.getInteger(ctx, "delta");
+        WarManager wm = TownyWarPlugin.get().getWarManager();
+
+        if (!wm.addStartingBonus(town, delta, actor(ctx))) {
+            int min = TownyWarPlugin.get().getConfigManager().getMinTotalPoints();
+            int max = TownyWarPlugin.get().getConfigManager().getMaxTotalPoints();
+            int base = TownyWarPlugin.get().getConfigManager().getDefaultPoints();
+            int cur = wm.getStartingBonus(town);
+            ctx.getSource().getSender().sendMessage(MM.deserialize(
+                    "<red>Не удалось прибавить: либо город <yellow>" + town
+                            + "</yellow> не найден, либо итог (" + (base + cur + delta)
+                            + ") вышел за [" + min + "; " + max + "].</red>"));
+            return 0;
+        }
+
         int total = wm.getStartingPoints(town);
         String sign = delta >= 0 ? "+" : "";
         ctx.getSource().getSender().sendMessage(MM.deserialize(

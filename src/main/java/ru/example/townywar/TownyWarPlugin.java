@@ -3,7 +3,11 @@ package ru.example.townywar;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.jetbrains.annotations.Nullable;
+import ru.example.townywar.api.TownyWarAPI;
+import ru.example.townywar.api.TownyWarAPIImpl;
 import ru.example.townywar.assault.AssaultTntManager;
 import ru.example.townywar.assault.AssaultTntRecipe;
 import ru.example.townywar.assault.AssaultTntRepository;
@@ -146,6 +150,15 @@ public final class TownyWarPlugin extends JavaPlugin {
         this.warshopManager.load();
         this.warshopMenu = new WarshopMenu(this, warshopManager);
 
+        // ===== Публичный API =====
+        getServer().getServicesManager().register(
+                TownyWarAPI.class,
+                new TownyWarAPIImpl(warManager, warshopManager),
+                this,
+                ServicePriority.Normal
+        );
+        getLogger().info("TownyWar API зарегистрирован (v" + TownyWarAPI.API_VERSION + ").");
+
         Bukkit.getScheduler().runTaskTimer(this, warshopManager::cleanupExpired, 20L, 20L);
 
         // Теперь безопасно: truce уже в памяти.
@@ -253,4 +266,10 @@ public final class TownyWarPlugin extends JavaPlugin {
     public AssaultTntManager getAssaultTntManager() { return assaultTntManager; }
     public WarStatsMenu getWarStatsMenu() { return warStatsMenu; }
     public WarListMenu getWarListMenu() { return warListMenu; }
+
+    /** Удобный доступ к API из других плагинов. Может вернуть null. */
+    public static @Nullable TownyWarAPI getAPI() {
+        var rsp = Bukkit.getServicesManager().getRegistration(TownyWarAPI.class);
+        return rsp == null ? null : rsp.getProvider();
+    }
 }

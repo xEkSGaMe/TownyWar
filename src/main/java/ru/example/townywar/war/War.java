@@ -1,6 +1,7 @@
 package ru.example.townywar.war;
 
 import org.jetbrains.annotations.Nullable;
+import ru.example.townywar.api.WarSnapshot;
 
 public final class War {
 
@@ -42,6 +43,14 @@ public final class War {
     public War withId(long newId) {
         return new War(newId, attackerTown, defenderTown, attackerPoints, defenderPoints,
                 phase, declaredAt, prepEndsAt, combatStartedAt, negotiationEndsAt,
+                endedAt, winnerTown, outcome);
+    }
+
+    /** Иммутабельный снимок для событий и API. */
+    public WarSnapshot snapshot() {
+        return new WarSnapshot(id, attackerTown, defenderTown,
+                attackerPoints, defenderPoints, phase.name(),
+                declaredAt, prepEndsAt, combatStartedAt, negotiationEndsAt,
                 endedAt, winnerTown, outcome);
     }
 
