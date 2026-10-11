@@ -1,6 +1,5 @@
 package ru.example.townywar.command;
 
-import com.palmergames.bukkit.towny.object.Resident;
 import com.palmergames.bukkit.towny.object.Town;
 import org.bukkit.entity.Player;
 import ru.example.townywar.TownyWarPlugin;
@@ -36,70 +35,7 @@ public final class WarCommand {
     // --- /t war <town> ---------------------------------------------------------
 
     private void declare(Player p, String targetName) {
-        if (!p.hasPermission("townywar.declare")) {
-            plugin.getMessages().send(p, "no-permission");
-            return;
-        }
-
-        Town own = plugin.getTownyHook().getTownOf(p);
-        if (own == null) {
-            plugin.getMessages().send(p, "not-in-town");
-            return;
-        }
-        if (!plugin.getTownyHook().isMayor(own, p)) {
-            plugin.getMessages().send(p, "not-mayor");
-            return;
-        }
-
-        Town target = plugin.getTownyHook().getTown(targetName);
-        if (target == null) {
-            plugin.getMessages().send(p, "town-not-found", "town", targetName);
-            return;
-        }
-        if (target.getName().equalsIgnoreCase(own.getName())) {
-            plugin.getMessages().send(p, "self-war");
-            return;
-        }
-        if (plugin.getTownyHook().isSameNation(own, target)) {
-            plugin.getMessages().send(p, "same-nation");
-            return;
-        }
-        if (plugin.getTownyHook().isNeutral(target) || plugin.getTownyHook().isNeutral(own)) {
-            plugin.getMessages().send(p, "neutral");
-            return;
-        }
-        if (warManager.isAtWar(own.getName())) {
-            plugin.getMessages().send(p, "already-at-war");
-            return;
-        }
-        if (warManager.isAtWar(target.getName())) {
-            plugin.getMessages().send(p, "target-at-war");
-            return;
-        }
-
-        long ageMs = System.currentTimeMillis() - own.getRegistered();
-        long requiredMs = plugin.getConfigManager().getMinTownAgeDays() * 86_400_000L;
-        if (ageMs < requiredMs) {
-            long leftDays = (requiredMs - ageMs) / 86_400_000L + 1;
-            plugin.getMessages().send(p, "town-too-young", "days", String.valueOf(leftDays));
-            return;
-        }
-
-        War w = warManager.declare(own.getName(), target.getName());
-        if (w == null) {
-            plugin.getMessages().send(p, "declare-failed");
-            return;
-        }
-
-        plugin.getMessages().send(p, "war-declared", "target", target.getName());
-
-        for (Resident r : target.getResidents()) {
-            Player online = r.getPlayer();
-            if (online != null) {
-                plugin.getMessages().send(online, "war-declared-defender",
-                        "attacker", own.getName());
-            }
-        }
+        plugin.getWarDeclareCommand().execute(p, targetName);
     }
 
     // --- /t war cancel ---------------------------------------------------------
